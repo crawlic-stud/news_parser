@@ -29,7 +29,7 @@ def get_trends_titles(page=1):
 
 
 def get_news_by_category(page=0, category="politics"):
-    """Scrapes news titles from chosen category"""
+    """Scrapes news from chosen category"""
     if page < 0:
         return []
 
@@ -53,7 +53,11 @@ def get_news_by_category(page=0, category="politics"):
     dates = [dt[1] for dt in dt_text]
     times = [dt[0] for dt in dt_text]
 
-    result = [{"title": d[0], "time": d[1], "date": d[2]} for d in zip(titles_text, times, dates)]
+    links = soup.find_all("a", class_="item__link")
+    links = [link["href"] for link in links]
+
+    result = [{"title": d[0], "time": d[1], "date": d[2], "link": d[3]}
+              for d in zip(titles_text, times, dates, links)]
 
     return result
 
@@ -77,7 +81,20 @@ if __name__ == '__main__':
     # check_correct_processing(get_trends_titles)
     # check_correct_processing(get_news_by_category)
     MAX_AMOUNT = 84
-    for i in range(MAX_AMOUNT):
+    with open("news.json", "r") as f:
+        try:
+            news = json.load(f)
+        except json.decoder.JSONDecodeError:
+            news = []
+
+    for i in range(1):
         for new in get_news_by_category(i, category="politics"):
-            print(new)
+            if new not in news:
+                news.append(new)
+
+    for n in news:
+        print(n)
+
+    with open("news.json", "w") as f:
+        json.dump(news, f, indent=4, ensure_ascii=True)
 
