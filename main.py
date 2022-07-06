@@ -1,100 +1,105 @@
+import datetime
 import json
-from datetime import datetime
 
 import requests
-import asyncio
-import aiohttp
 from bs4 import BeautifulSoup
+from markovify import NewlineText, Text
 
 
-MONTHS = ["", "янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сент", "окт", "нояб", "дек"]
+def get_main_news_by_date(year, month, day):
+    article_url = f"https://web.archive.org/web/{year + month + day}045319/https://www.rbc.ru/politics/{day}/{month}/{year}/62074b119a7947b0e49b36f7"
+    response = requests.get(article_url)
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    article_special = soup.find("div", class_="article__special_container")
+    article_special_title = article_special.find("p").text
+    article_special_news = [news for news in article_special.find_all("li")]
+
+    special_news_with_links = []
+    for new in article_special_news:
+        special_news_with_links.append({"text": new.text.strip(),
+                                        "link": ""})
+        if new.find("a"):
+            special_news_with_links[-1]["link"] = new.find("a").get("href")
+
+    return article_url, article_special_title, special_news_with_links
 
 
-def get_trends_titles(page=1):
-    """Scrapes trending news titles"""
-
-    url = f"https://trends.rbc.ru/trends/ajax/short_news/?offset={page*12}&limit=8"
-
-    req = requests.get(url)
-    data = json.loads(req.text)["html"]
-
-    soup = BeautifulSoup(data, "html.parser")
-    titles = soup.find_all("a", class_="item__title")
-    titles_text = [title.text.strip() for title in titles]
-
-    if page <= 0:
-        titles_text = titles_text[:12]
-
-    return titles_text
+def format_number(num):
+    return str(num).zfill(2)
 
 
-def get_news_by_category(page=0, category="politics"):
-    """Scrapes news from chosen category"""
-    if page < 0:
-        return []
-
-    url = f"https://www.rbc.ru/v10/ajax/get-news-by-filters/?category={category}&offset={page*12}&limit=12"
-
-    req = requests.get(url)
-    data = json.loads(req.text)["html"]
-
-    soup = BeautifulSoup(data, "html.parser")
-
-    titles = soup.find_all("span", class_="item__title")
-    titles_text = [title.text.strip() for title in titles]
-
-    date_time = soup.find_all("span", class_="item__category")
-    dt_text = [dt.text.strip().split(", ")[::-1] for dt in date_time]
-
-    for i, dt in enumerate(dt_text):
-        if len(dt) == 1:
-            dt_text[i].append(f"{datetime.now().day} {MONTHS[datetime.now().month]}")
-
-    dates = [dt[1] for dt in dt_text]
-    times = [dt[0] for dt in dt_text]
-
-    links = soup.find_all("a", class_="item__link")
-    links = [link["href"] for link in links]
-
-    result = [{"title": d[0], "time": d[1], "date": d[2], "link": d[3]}
-              for d in zip(titles_text, times, dates, links)]
-
-    return result
+def get_all_dates(year=2022, month=2, day=24):
+    curr_date = datetime.datetime.today()
+    date_list = [(str(curr_date.year), format_number(curr_date.month), format_number(curr_date.day))]
+    while curr_date.year != year:
+        curr_date = curr_date - datetime.timedelta(days=1)
+        date_list.append((str(curr_date.year), format_number(curr_date.month), format_number(curr_date.day)))
+    while curr_date.month != month:
+        curr_date = curr_date - datetime.timedelta(days=1)
+        date_list.append((str(curr_date.year), format_number(curr_date.month), format_number(curr_date.day)))
+    while curr_date.day != day:
+        curr_date = curr_date - datetime.timedelta(days=1)
+        date_list.append((str(curr_date.year), format_number(curr_date.month), format_number(curr_date.day)))
+    return date_list
 
 
-def check_correct_processing(scraper_func):
-    """If nothing is printed then news scraping works correctly."""
-    processed = []
-    for i in range(100):
+def collect_all_data_to_json():
+    dates = get_all_dates()[::-1]
+    all_news_list = []
+
+    for date in dates:
         try:
-            for t in scraper_func(i):
-                if t not in processed:
-                    processed.append(t)
-                else:
-                    print(f"{i=} повторяется")
-        except json.decoder.JSONDecodeError:
-            print(f"page {i} - no more news")
-            break
+            print(date, "done")
+            url, title, news_list = get_main_news_by_date(*date)
+        except Exception as e:
+            print(date, f"error: {e}")
+            url, title, news_list = "", "", []
+
+        news_dict = {
+            "date": ".".join(list(date)),
+            "title": title,
+            "url": url,
+            "news": news_list
+        }
+
+        all_news_list.append(news_dict)
+
+    # print(all_news_list)
+    # print(json.dumps(all_news_list, indent=4, ensure_ascii=False))
+    with open("data.json", "w") as f:
+        json.dump(all_news_list, f, ensure_ascii=True, indent=4)
+
+
+def extract_news_to_txt():
+    with open("scraped_data.json", "r") as f:
+        data = json.load(f)
+
+    text_data = []
+    for each in data:
+        news = each["news"]
+        for new in news:
+            text_data.append(new["text"]) if new["text"] else None
+
+    text_data = "\n".join(text_data)
+
+    with open("text_data.txt", "w", encoding="utf-8") as f:
+        f.write(text_data)
+
+
+def generate_sentence():
+    with open("text_data.txt", "r", encoding="utf-8") as f:
+        text = f.read()
+
+    # print(text)
+    text_model = NewlineText(text, state_size=1, well_formed=True)
+    sentence = text_model.make_sentence()
+    return sentence
 
 
 if __name__ == '__main__':
-    # check_correct_processing(get_trends_titles)
-    # check_correct_processing(get_news_by_category)
-    MAX_AMOUNT = 84
-    with open("news.json", "r") as f:
-        try:
-            news = json.load(f)
-        except json.decoder.JSONDecodeError:
-            news = []
-
-    for i in range(1):
-        for new in get_news_by_category(i, category="politics"):
-            if new not in news:
-                news.append(new)
-
-    for n in news:
-        print(n)
-
-    with open("news.json", "w") as f:
-        json.dump(news, f, indent=4, ensure_ascii=True)
-
+    # print(get_all_dates())
+    # collect_all_data_to_json()
+    # extract_news_to_txt()
+    for _ in range(5):
+        print(generate_sentence())
